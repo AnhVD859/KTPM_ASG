@@ -1,0 +1,28 @@
+{
+  "name": "cs2",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "amqplib": "^0.10.7",
+    "cors": "^2.8.5",
+    "cs2": "file:",
+    "express": "^5.1.0",
+    "k6": "^0.0.0",
+    "multer": "^1.4.5-lts.2",
+    "node-fetch": "^2.7.0",
+    "node-tesseract-ocr": "^2.2.1",
+    "open-google-translator": "^1.0.5",
+    "pdfkit": "^0.15.0",
+    "sharp": "^0.34.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
