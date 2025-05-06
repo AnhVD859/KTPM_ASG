@@ -14,3 +14,13 @@ $ npm install
 $ mkdir output
 # Khởi chạy ứng dụng BE demo
 $ npm start
+```
+
+## Chạy ứng dụng FE
+Trong folder CS2/frontend-app
+```sh
+# Cài đặt các gói liên quan
+$ npm install
+# Khởi chạy ứng dụng demo
+$ npm start
+```
