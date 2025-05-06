@@ -1,157 +1,127 @@
-const fetch = require('node-fetch');
-global.fetch = fetch;
-global.Headers = fetch.Headers;
-
 const express = require('express');
 const multer = require('multer');
 const amqp = require('amqplib/callback_api');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+
+const DB_FILE_PATH = path.join(__dirname, 'db.json');
 
 const app = express();
 app.use(cors());
+app.use(express.static('public'));
 
-const fs = require('fs');
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         cb(null, 'data/');
     },
     filename: function (req, file, cb) {
-        cb(null, file.originalname); // giữ tên gốc
+        cb(null, file.originalname);
     }
 });
 const upload = multer({ storage: storage });
 
-const { imageConsumer, DB_FILE_PATH } = require('./image-consumer');
-imageConsumer();
-
-app.use(express.static('public'));
-
-// Biến lưu trữ kết nối và channel RabbitMQ
 let rabbitConnection = null;
 let rabbitChannel = null;
 
-// Hàm khởi tạo kết nối RabbitMQ
-const initRabbitMQ = () => {
-    amqp.connect('amqp://localhost', (error0, connection) => {
-        if (error0) {
-            console.error('Failed to connect to RabbitMQ:', error0);
-            // Thử lại sau 5 giây
-            setTimeout(initRabbitMQ, 5000);
-            return;
-        }
-
-        rabbitConnection = connection;
-
-        // Xử lý khi kết nối bị đóng
-        connection.on('error', (err) => {
-            console.error('RabbitMQ connection error:', err);
-            rabbitConnection = null;
-            rabbitChannel = null;
-            setTimeout(initRabbitMQ, 5000);
-        });
-
-        connection.on('close', () => {
-            console.error('RabbitMQ connection closed');
-            rabbitConnection = null;
-            rabbitChannel = null;
-            setTimeout(initRabbitMQ, 5000);
-        });
-
-        // Tạo channel
-        connection.createChannel((error1, channel) => {
-            if (error1) {
-                console.error('Failed to create RabbitMQ channel:', error1);
-                connection.close();
-                rabbitConnection = null;
-                setTimeout(initRabbitMQ, 5000);
-                return;
+function initRabbitMQ() {
+    return new Promise((resolve, reject) => {
+        amqp.connect('amqp://localhost', (err, connection) => {
+            if (err) {
+                console.error('Không thể kết nối tới RabbitMQ:', err);
+                return reject(err);
             }
 
-            const queue = 'image-processing';
-            channel.assertQueue(queue, {
-                durable: false
-            });
+            rabbitConnection = connection;
 
-            rabbitChannel = channel;
-            console.log('RabbitMQ connected and channel created');
+            connection.createChannel((err, channel) => {
+                if (err) {
+                    console.error('Không thể tạo channel RabbitMQ:', err);
+                    return reject(err);
+                }
+
+                rabbitChannel = channel;
+                channel.assertQueue('ocr_queue', { durable: true });
+                channel.assertQueue('translation_queue', { durable: true });
+                channel.assertQueue('pdf_queue', { durable: true });
+                channel.assertQueue('result_queue', { durable: true });
+
+                console.log('Đã kết nối thành công tới RabbitMQ');
+                resolve();
+            });
         });
     });
-};
+}
 
-// Khởi động kết nối RabbitMQ khi server khởi động
-initRabbitMQ();
-
-// Hàm gửi message tới RabbitMQ
-const sendToQueue = (message, res) => {
-    if (!rabbitChannel) {
-        console.error('RabbitMQ channel not available');
-        return res.status(500).send('RabbitMQ channel not available');
-    }
-
-    try {
-        const queue = 'image-processing';
-        rabbitChannel.sendToQueue(queue, Buffer.from(message), { persistent: true });
-        console.log(" [x] Sent %s", message);
-    } catch (err) {
-        console.error('Failed to send message to queue:', err);
-        return res.status(500).send('Failed to send message to RabbitMQ');
-    }
-};
-
+// API upload ảnh
 app.post('/upload', upload.single('image'), (req, res) => {
     if (!req.file) {
-        console.error("❌ Không nhận được file upload từ client");
-        return res.status(400).json({ error: "No file uploaded" });
+        return res.status(400).json({ error: 'Không có file được tải lên' });
     }
-    const filePath = req.file.path;
-    const message = JSON.stringify({ filePath });
 
-    const db = fs.existsSync(DB_FILE_PATH)
-    ? JSON.parse(fs.readFileSync(DB_FILE_PATH, 'utf-8'))
-    : [];
-    const result = db.find(entry => entry.originalFilePath === filePath);
-    if (result) {
-        const pdfPath = result.pdfFilePath;
+    const db = fs.existsSync(DB_FILE_PATH) ? JSON.parse(fs.readFileSync(DB_FILE_PATH, 'utf-8')) : [];
+    const result = db.find(entry => entry.originalFilePath === req.file.path);
+    if (result && fs.existsSync(result.pdfFilePath)) {
         return res.download(pdfPath);
     }
 
-    // Gửi message tới RabbitMQ
-    sendToQueue(message, res);
+    const imageData = {
+        originalFilePath: req.file.path,
+        timestamp: new Date().toISOString(),
+        status: 'processing',
+        id: Date.now().toString()
+    };
 
-    // Chờ xử lý và kiểm tra kết quả trong db.json
-    const checkResult = setInterval(() => {
-        try {
-            const db2 = fs.existsSync(DB_FILE_PATH)
-                ? JSON.parse(fs.readFileSync(DB_FILE_PATH, 'utf-8'))
-                : [];
-            const result = db2.find(entry => entry.originalFilePath === filePath);
+    // Gửi job vào OCR queue
+    rabbitChannel.sendToQueue('ocr_queue', Buffer.from(JSON.stringify(imageData)), {
+        persistent: true
+    });
 
-            if (result) {
-                clearInterval(checkResult);
-                const pdfPath = result.pdfFilePath;
-                return res.download(pdfPath);
+    // Đợi kết quả từ result_queue, tạo consumer cho kết quả cuối cùng
+    const resultConsumer = rabbitChannel.consume('result_queue', (msg) => {
+        if (msg !== null) {
+            const result = JSON.parse(msg.content.toString());
+            if (result.id === imageData.id) {
+                rabbitChannel.cancel(msg.fields.consumerTag);
+                rabbitChannel.ack(msg);
+                return res.download(result.pdfPath);
+            } else {
+                rabbitChannel.nack(msg);
             }
-        } catch (err) {
-            clearInterval(checkResult);
-            console.error('Error checking db.json:', err);
-            return res.status(500).send('Error checking db.json');
         }
-    }, 1000);
+    }, { noAck: false });
+});
+
+app.get('/status/:id', (req, res) => {
+    const id = req.params.id;
+    const dbFilePath = path.join(__dirname, 'db.json');
+
+    if (!fs.existsSync(dbFilePath)) {
+        return res.status(404).json({ error: 'Không tìm thấy dữ liệu' });
+    }
+
+    const db = JSON.parse(fs.readFileSync(dbFilePath, 'utf-8'));
+    const entry = db.find(item => item.id === id);
+
+    if (!entry) {
+        return res.status(404).json({ error: 'Không tìm thấy job' });
+    }
+
+    res.json(entry);
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
 
-// Xử lý khi server tắt
-process.on('SIGINT', () => {
-    if (rabbitConnection) {
-        rabbitConnection.close(() => {
-            console.log('RabbitMQ connection closed');
-            process.exit(0);
+async function startServer() {
+    try {
+        await initRabbitMQ();
+        app.listen(PORT, () => {
+            console.log(`Server đang chạy trên cổng ${PORT}`);
         });
-    } else {
-        process.exit(0);
+    } catch (error) {
+        console.error('Không thể khởi động server:', error);
+        process.exit(1);
     }
-});
+}
+
+startServer();
