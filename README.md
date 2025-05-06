@@ -14,6 +14,9 @@ $ npm install
 $ mkdir output
 # Khởi chạy ứng dụng BE demo
 $ npm start
+$ npm run ocr
+$ npm run translate
+$ npm run pdf
 ```
 
 ## Chạy ứng dụng FE
