@@ -2,7 +2,7 @@ const amqp = require('amqplib/callback_api');
 const fs = require('fs');
 const path = require('path');
 const { createPDF } = require('./utils/pdf');
-const PDFDocument = require('pdfkit');
+const { saveToDb } = require('./db-manager');
 
 const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const OUT_DIR = './output';
@@ -10,19 +10,6 @@ const OUT_DIR = './output';
 // Đảm bảo thư mục output tồn tại
 if (!fs.existsSync(OUT_DIR)) {
     fs.mkdirSync(OUT_DIR);
-}
-
-function saveToDb(data) {
-    const db = fs.existsSync(DB_FILE_PATH) ? JSON.parse(fs.readFileSync(DB_FILE_PATH, 'utf-8')) : [];
-
-    const index = db.findIndex(entry => entry.originalFilePath === data.originalFilePath);
-    if (index !== -1) {
-        db[index] = data;
-    } else {
-        db.push(data);
-    }
-
-    fs.writeFileSync(DB_FILE_PATH, JSON.stringify(db, null, 2));
 }
 
 function startPdfConsumer() {
@@ -46,6 +33,7 @@ function startPdfConsumer() {
 
             channel.assertQueue(pdfQueue, { durable: true });
             channel.assertQueue(resultQueue, { durable: true });
+            channel.prefetch(1);
 
             console.log('PdfConsumer đã sẵn sàng');
 
@@ -63,7 +51,7 @@ function startPdfConsumer() {
                     try {
                         const pdfFile = createPDF(data.translatedText);
                         const docStream = fs.createWriteStream(pdfFile);
-                        
+
                         // Xử lý khi docStream kết thúc
                         docStream.on('finish', () => {
                             try {

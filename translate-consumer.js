@@ -1,22 +1,6 @@
 const amqp = require('amqplib/callback_api');
-const fs = require('fs');
-const path = require('path');
 const { translate } = require('./utils/translate');
-
-const DB_FILE_PATH = path.join(__dirname, 'db.json');
-
-function saveToDb(data) {
-  const db = fs.existsSync(DB_FILE_PATH) ? JSON.parse(fs.readFileSync(DB_FILE_PATH, 'utf-8')) : [];
-
-  const index = db.findIndex(entry => entry.originalFilePath === data.originalFilePath);
-  if (index !== -1) {
-    db[index] = data;
-  } else {
-    db.push(data);
-  }
-
-  fs.writeFileSync(DB_FILE_PATH, JSON.stringify(db, null, 2));
-}
+const { saveToDb } = require('./db-manager');
 
 function normalizeText(text) {
   const lines = text.split('\n');
@@ -63,7 +47,7 @@ function startTranslateConsumer() {
       
       channel.assertQueue(translationQueue, { durable: true });
       channel.assertQueue(pdfQueue, { durable: true });
-      channel.prefetch(2);
+      channel.prefetch(4);
       
       console.log(`TranslateConsumer đã sẵn sàng`);
       

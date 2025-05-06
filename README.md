@@ -14,19 +14,3 @@ $ npm install
 $ mkdir output
 # Khởi chạy ứng dụng BE demo
 $ npm start
-```
-
-## Chạy ứng dụng FE
-Trong folder CS2/frontend-app
-```sh
-# Cài đặt các gói liên quan
-$ npm install
-# Khởi chạy ứng dụng demo
-$ npm start
-```
-
-## Testing
-Chạy file upload-test.bat
-Khi chưa áp dụng lưu lại, trung bình 1rq cần 1.001s để xử lý (upload-test-result-1.csv)
-Khi có áp dụng lưu lại, trung bình 1rq chỉ cần 0.003s để xử lý (upload-test-result-2.csv)
-Đánh giá: đây chỉ là lưu lại cơ bản nhưng đã có thể tối ưu api, trong thực tế có thể cần **sử dụng nhiều kỹ thuật hơn để tối ưu API**
